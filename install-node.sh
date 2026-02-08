@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Vector-Link Node 一键部署脚本
 # 用法:
-#   安装:   curl -fsSL https://raw.githubusercontent.com/cloverstd/vector-link-release/main/install-node.sh | bash -s -- --master http://1.2.3.4:8080 --token YOUR_TOKEN
+#   安装:   curl -fsSL http://<Server地址>:8080/api/v1/install-node.sh | bash -s -- --master http://<Server地址>:8080 --token YOUR_TOKEN
 #   指定版本: curl -fsSL ... | bash -s -- --master ... --token ... --version v1.0.0
 #   卸载:   curl -fsSL ... | bash -s -- --uninstall
 
