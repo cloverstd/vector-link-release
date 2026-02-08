@@ -125,7 +125,7 @@ install() {
     # 生成配置文件（不覆盖已有配置）
     if [ ! -f "${CONFIG_FILE}" ]; then
         local jwt_secret
-        jwt_secret=$(head -c 32 /dev/urandom | xxd -p | tr -d '\n')
+        jwt_secret=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
         cat > "${CONFIG_FILE}" <<EOF
 server:
   host: 0.0.0.0
