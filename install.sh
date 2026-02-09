@@ -716,7 +716,7 @@ After=network.target
 Type=simple
 ExecStart=${BIN_PATH} server -c ${config_file}
 WorkingDirectory=${data_dir}
-Restart=on-failure
+Restart=always
 RestartSec=5
 LimitNOFILE=65536
 
@@ -804,7 +804,7 @@ After=network.target
 Type=simple
 ExecStart=${BIN_PATH} node -c ${config_file}
 WorkingDirectory=${CONFIG_DIR}
-Restart=on-failure
+Restart=always
 RestartSec=5
 LimitNOFILE=65536
 

@@ -175,7 +175,7 @@ After=network.target
 Type=simple
 ExecStart=${BIN_PATH} node -c ${CONFIG_FILE}
 WorkingDirectory=${CONFIG_DIR}
-Restart=on-failure
+Restart=always
 RestartSec=5
 LimitNOFILE=65536
 

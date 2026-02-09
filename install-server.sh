@@ -160,7 +160,7 @@ After=network.target
 Type=simple
 ExecStart=${BIN_PATH} server -c ${CONFIG_FILE}
 WorkingDirectory=${DATA_DIR}
-Restart=on-failure
+Restart=always
 RestartSec=5
 LimitNOFILE=65536
 
