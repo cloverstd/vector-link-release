@@ -18,7 +18,7 @@ RUN chmod +x ./vector-link
 RUN mkdir -p /app/data /usr/local/bin /usr/local/share/xray && \
     chown -R appuser:appuser /app /usr/local/share/xray
 
-COPY entrypoint.sh /app/entrypoint.sh
+COPY deploy/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8080
