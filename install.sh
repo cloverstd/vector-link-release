@@ -55,6 +55,10 @@ LOG_LEVEL="info"
 REPORT_INTERVAL="30"
 XRAY_VERSION="latest"
 DO_UNINSTALL=false
+OVERWRITE_BINARY=false
+OVERWRITE_CONFIG=false
+SKIP_NTP=false
+AUTO_INSTALL_NTP=false
 
 # ── 颜色输出 ─────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -132,6 +136,204 @@ read_choice() {
     else
         echo "1"
     fi
+}
+
+# ── 覆盖安装检测 ──────────────────────────────────────────
+get_installed_version() {
+    if [ -f "$BIN_PATH" ] && [ -x "$BIN_PATH" ]; then
+        "$BIN_PATH" --version 2>/dev/null || echo "未知版本"
+    else
+        echo ""
+    fi
+}
+
+check_existing_installation() {
+    local mode="$1"
+    local method="$2"
+
+    # Docker 模式检查目录
+    if [ "$method" = "docker" ]; then
+        local dir="${INSTALL_DIR:-${INSTALL_DIR_DEFAULT}}"
+        if [ -f "${dir}/docker-compose.yml" ]; then
+            echo ""
+            warn "检测到已有 Docker 安装: ${dir}"
+            local choice
+            choice=$(read_choice "请选择操作:" "覆盖安装（更新镜像，保留配置）" "覆盖安装（更新镜像和配置，原配置自动备份）" "取消安装")
+            case "$choice" in
+                1)
+                    OVERWRITE_BINARY=true
+                    info "将更新镜像，保留现有配置"
+                    ;;
+                2)
+                    OVERWRITE_BINARY=true
+                    OVERWRITE_CONFIG=true
+                    info "将更新镜像和配置，原配置将备份"
+                    ;;
+                3)
+                    info "安装已取消"
+                    exit 0
+                    ;;
+            esac
+        fi
+        return
+    fi
+
+    # 系统服务模式检查二进制和配置
+    local installed_version
+    installed_version=$(get_installed_version)
+    local config_file
+    if [ "$mode" = "server" ]; then
+        config_file="${CONFIG_DIR}/server.yaml"
+    else
+        config_file="${CONFIG_DIR}/node.yaml"
+    fi
+
+    if [ -n "$installed_version" ] || [ -f "$config_file" ]; then
+        echo ""
+        warn "检测到已有安装:"
+        if [ -n "$installed_version" ]; then
+            warn "  二进制文件: ${BIN_PATH} (${installed_version})"
+        fi
+        if [ -f "$config_file" ]; then
+            warn "  配置文件: ${config_file}"
+        fi
+
+        local choice
+        choice=$(read_choice "请选择操作:" "覆盖安装（更新二进制，保留配置）" "覆盖安装（更新二进制和配置，原配置自动备份）" "取消安装")
+        case "$choice" in
+            1)
+                OVERWRITE_BINARY=true
+                info "将更新二进制文件，保留现有配置"
+                ;;
+            2)
+                OVERWRITE_BINARY=true
+                OVERWRITE_CONFIG=true
+                info "将更新二进制文件和配置，原配置将备份"
+                ;;
+            3)
+                info "安装已取消"
+                exit 0
+                ;;
+        esac
+    fi
+}
+
+# ── NTP 时间同步 ──────────────────────────────────────────
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "$ID" in
+            debian|ubuntu|linuxmint|pop) echo "debian" ;;
+            centos|rhel|rocky|alma|ol) echo "rhel" ;;
+            fedora) echo "fedora" ;;
+            alpine) echo "alpine" ;;
+            arch|manjaro) echo "arch" ;;
+            opensuse*|sles) echo "suse" ;;
+            *) echo "unknown" ;;
+        esac
+    elif [ -f /etc/redhat-release ]; then
+        echo "rhel"
+    elif [ -f /etc/debian_version ]; then
+        echo "debian"
+    else
+        echo "unknown"
+    fi
+}
+
+check_ntp_status() {
+    # 方法1: timedatectl
+    if command -v timedatectl &>/dev/null; then
+        local ntp_status
+        ntp_status=$(timedatectl 2>/dev/null | grep -iE "NTP (synchronized|service|enabled)" || true)
+        if echo "$ntp_status" | grep -qiE "(yes|active|enabled)"; then
+            return 0
+        fi
+    fi
+
+    # 方法2: chronyc
+    if command -v chronyc &>/dev/null; then
+        if chronyc tracking &>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # 方法3: ntpq
+    if command -v ntpq &>/dev/null; then
+        if ntpq -p &>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # 方法4: systemd-timesyncd
+    if systemctl is-active --quiet systemd-timesyncd 2>/dev/null; then
+        return 0
+    fi
+
+    return 1
+}
+
+install_ntp() {
+    local distro
+    distro=$(detect_distro)
+
+    info "正在安装 NTP 时间同步服务..."
+
+    case "$distro" in
+        debian)
+            # 先尝试 timedatectl
+            if command -v timedatectl &>/dev/null; then
+                timedatectl set-ntp true 2>/dev/null && { success "已通过 timedatectl 启用 NTP 同步"; return 0; }
+            fi
+            # 安装 chrony
+            apt-get update -qq && apt-get install -y -qq chrony >/dev/null 2>&1
+            systemctl enable chrony && systemctl start chrony
+            ;;
+        rhel|fedora)
+            yum install -y chrony >/dev/null 2>&1 || dnf install -y chrony >/dev/null 2>&1
+            systemctl enable chronyd && systemctl start chronyd
+            ;;
+        alpine)
+            apk add --no-cache chrony >/dev/null 2>&1
+            rc-update add chronyd default 2>/dev/null || true
+            service chronyd start 2>/dev/null || rc-service chronyd start 2>/dev/null || true
+            ;;
+        arch)
+            pacman -Sy --noconfirm ntp >/dev/null 2>&1
+            systemctl enable ntpd && systemctl start ntpd
+            ;;
+        suse)
+            zypper install -y chrony >/dev/null 2>&1
+            systemctl enable chronyd && systemctl start chronyd
+            ;;
+        *)
+            warn "无法自动安装 NTP 服务（未识别的发行版），请手动安装"
+            return 1
+            ;;
+    esac
+
+    success "NTP 时间同步服务已安装并启动"
+}
+
+check_and_setup_ntp() {
+    if check_ntp_status; then
+        success "NTP 时间同步已启用"
+        return 0
+    fi
+
+    warn "未检测到 NTP 时间同步服务"
+    warn "Xray 节点时间不同步可能导致连接失败"
+
+    if [ "$AUTO_INSTALL_NTP" = true ]; then
+        install_ntp
+        return $?
+    fi
+
+    local choice
+    choice=$(read_choice "是否安装 NTP 时间同步服务？" "是，自动安装（推荐）" "否，跳过")
+    case "$choice" in
+        1) install_ntp ;;
+        2) warn "已跳过 NTP 安装，请确保系统时间同步" ;;
+    esac
 }
 
 # ── 工具函数 ─────────────────────────────────────────────────
@@ -292,6 +494,14 @@ parse_args() {
                 DO_UNINSTALL=true
                 shift
                 ;;
+            --skip-ntp)
+                SKIP_NTP=true
+                shift
+                ;;
+            --install-ntp)
+                AUTO_INSTALL_NTP=true
+                shift
+                ;;
             --help | -h)
                 show_help
                 exit 0
@@ -316,6 +526,8 @@ Vector-Link 统一安装脚本
   --version VERSION          指定版本号（默认: 最新版）
   --timezone TIMEZONE        时区（默认: Asia/Shanghai）
   --uninstall                卸载
+  --skip-ntp               跳过 NTP 时间同步检查
+  --install-ntp            自动安装 NTP（非交互式）
   --help                     显示帮助
 
 Server 选项:
@@ -682,7 +894,12 @@ install_system_server() {
     [ -z "$ADMIN_PASS" ] && ADMIN_PASS=$(generate_password)
 
     # 生成配置文件（不覆盖已有配置）
-    if [ ! -f "${config_file}" ]; then
+    if [ ! -f "${config_file}" ] || [ "$OVERWRITE_CONFIG" = true ]; then
+        if [ -f "${config_file}" ] && [ "$OVERWRITE_CONFIG" = true ]; then
+            local backup="${config_file}.bak.$(date +%Y%m%d%H%M%S)"
+            cp "${config_file}" "${backup}"
+            info "原配置已备份到: ${backup}"
+        fi
         cat > "${config_file}" <<EOF
 server:
   host: 0.0.0.0
@@ -769,7 +986,12 @@ install_system_node() {
     mkdir -p "${CONFIG_DIR}"
 
     # 生成配置文件（不覆盖已有配置）
-    if [ ! -f "${config_file}" ]; then
+    if [ ! -f "${config_file}" ] || [ "$OVERWRITE_CONFIG" = true ]; then
+        if [ -f "${config_file}" ] && [ "$OVERWRITE_CONFIG" = true ]; then
+            local backup="${config_file}.bak.$(date +%Y%m%d%H%M%S)"
+            cp "${config_file}" "${backup}"
+            info "原配置已备份到: ${backup}"
+        fi
         cat > "${config_file}" <<EOF
 master:
   url: "${ws_url}"
@@ -918,6 +1140,12 @@ main() {
         *) error "无效的模式: $MODE（仅支持 server/node）" ;;
     esac
     prompt_common_config
+
+    check_existing_installation "$MODE" "$METHOD"
+
+    if [ "$SKIP_NTP" != true ]; then
+        check_and_setup_ntp
+    fi
 
     # 确认信息
     echo ""

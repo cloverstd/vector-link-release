@@ -249,6 +249,23 @@ main() {
         error "缺少 --token 参数，请提供节点 Token，例如: --token YOUR_NODE_TOKEN"
     fi
 
+    # 检测已有安装
+    if [ -f "$BIN_PATH" ]; then
+        local installed_ver
+        installed_ver=$("$BIN_PATH" --version 2>/dev/null || echo "未知版本")
+        warn "检测到已安装: ${BIN_PATH} (${installed_ver})"
+        warn "将覆盖安装二进制文件，保留现有配置"
+    fi
+
+    # NTP 时间同步提示
+    if command -v timedatectl &>/dev/null; then
+        local ntp_status
+        ntp_status=$(timedatectl 2>/dev/null | grep -iE "NTP (synchronized|service|enabled)" || true)
+        if ! echo "$ntp_status" | grep -qiE "(yes|active|enabled)"; then
+            warn "未检测到 NTP 时间同步，建议启用: timedatectl set-ntp true"
+        fi
+    fi
+
     install "$version" "$master_url" "$token"
 }
 
