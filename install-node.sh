@@ -9,6 +9,7 @@ set -euo pipefail
 
 REPO="cloverstd/vector-link-release"
 BIN_NAME="vector-link"
+GHPROXY_URL="https://ghproxy.com"
 BIN_PATH="/usr/local/bin/${BIN_NAME}"
 CONFIG_DIR="/etc/vector-link"
 CONFIG_FILE="${CONFIG_DIR}/node.yaml"
@@ -60,9 +61,16 @@ detect_os() {
 # ── 版本获取 ──────────────────────────────────────────────
 get_latest_version() {
     local version
-    version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+    local api_url="https://api.github.com/repos/${REPO}/releases/latest"
+
+    version=$(curl -fsSL "$api_url" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
     if [ -z "$version" ]; then
-        error "无法获取最新版本号"
+        warn "GitHub API 请求失败，尝试通过 ghproxy 获取..."
+        version=$(curl -fsSL "${GHPROXY_URL}/${api_url}" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+    fi
+
+    if [ -z "$version" ]; then
+        error "无法获取最新版本号（GitHub 和 ghproxy 均失败）"
     fi
     echo "$version"
 }
@@ -125,11 +133,16 @@ install() {
     info "安装版本: ${version}"
 
     download_url="https://github.com/${REPO}/releases/download/${version}/${BIN_NAME}-${os}-${arch}"
-    info "下载 ${download_url} ..."
+    local proxy_url="${GHPROXY_URL}/${download_url}"
 
-    if ! curl -fSL -o "${BIN_PATH}.tmp" "$download_url"; then
-        rm -f "${BIN_PATH}.tmp"
-        error "下载失败，请检查版本号和网络连接"
+    info "下载 ${download_url} ..."
+    if ! curl -fSL -o "${BIN_PATH}.tmp" "$download_url" 2>/dev/null; then
+        warn "GitHub 下载失败，尝试通过 ghproxy 下载..."
+        info "下载 ${proxy_url} ..."
+        if ! curl -fSL -o "${BIN_PATH}.tmp" "$proxy_url"; then
+            rm -f "${BIN_PATH}.tmp"
+            error "下载失败（GitHub 和 ghproxy 均失败），请检查版本号和网络连接"
+        fi
     fi
     mv "${BIN_PATH}.tmp" "${BIN_PATH}"
     chmod +x "${BIN_PATH}"

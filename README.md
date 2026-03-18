@@ -4,16 +4,28 @@
 
 ## 快速安装
 
-### Server（控制端）
+### 统一安装脚本（推荐）
+
+交互式安装，自动选择 Server/Node 模式和 Docker/系统服务方式：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cloverstd/vector-link-release/main/install-server.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cloverstd/vector-link-release/main/install.sh | bash
 ```
 
-安装指定版本：
+### 非交互式安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cloverstd/vector-link-release/main/install-server.sh | bash -s -- --version v1.0.0
+# Server（系统服务）
+bash install.sh --mode server --method system --port 8080
+
+# Node（系统服务）
+bash install.sh --mode node --method system --master http://<SERVER>:8080 --token <TOKEN>
+
+# Server（Docker）
+bash install.sh --mode server --method docker --port 8080
+
+# Node（Docker）
+bash install.sh --mode node --method docker --master http://<SERVER>:8080 --token <TOKEN>
 ```
 
 安装完成后，默认访问地址 `http://<服务器IP>:8080`，默认账号 `admin` / `admin123`，请立即修改密码。
@@ -43,7 +55,7 @@ systemctl stop vector-link-server
 ## 卸载
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cloverstd/vector-link-release/main/install-server.sh | bash -s -- --uninstall
+bash install.sh --uninstall --mode server --method system
 ```
 
 > 卸载不会删除配置文件和数据目录，如需彻底清理请手动删除。
