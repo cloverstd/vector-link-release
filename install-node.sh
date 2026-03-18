@@ -9,7 +9,7 @@ set -euo pipefail
 
 REPO="cloverstd/vector-link-release"
 BIN_NAME="vector-link"
-GHPROXY_URL="https://ghproxy.com"
+GHPROXY_URL="https://gh-proxy.com"
 BIN_PATH="/usr/local/bin/${BIN_NAME}"
 CONFIG_DIR="/etc/vector-link"
 CONFIG_FILE="${CONFIG_DIR}/node.yaml"

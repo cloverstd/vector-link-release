@@ -27,7 +27,7 @@ set -euo pipefail
 REPO="cloverstd/vector-link-release"
 BIN_NAME="vector-link"
 DOCKER_IMAGE="ghcr.io/cloverstd/vector-link-release"
-GHPROXY_URL="https://ghproxy.com"
+GHPROXY_URL="https://gh-proxy.com"
 
 # 系统安装路径
 BIN_PATH="/usr/local/bin/${BIN_NAME}"
