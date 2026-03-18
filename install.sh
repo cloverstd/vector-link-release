@@ -418,10 +418,10 @@ get_latest_version() {
     local version
     local api_url="https://api.github.com/repos/${REPO}/releases/latest"
 
-    version=$(curl -fsSL "$api_url" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+    version=$(curl -fsSL --connect-timeout 10 --max-time 30 "$api_url" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
     if [ -z "$version" ]; then
         warn "GitHub API 请求失败，尝试通过 ghproxy 获取..."
-        version=$(curl -fsSL "${GHPROXY_URL}/${api_url}" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+        version=$(curl -fsSL --connect-timeout 10 --max-time 30 "${GHPROXY_URL}/${api_url}" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
     fi
 
     if [ -z "$version" ]; then
@@ -876,10 +876,10 @@ download_binary() {
     proxy_url="${GHPROXY_URL}/${download_url}"
 
     info "下载 ${download_url} ..."
-    if ! curl -fSL -o "${BIN_PATH}.tmp" "$download_url" 2>/dev/null; then
+    if ! curl -fSL --connect-timeout 10 --max-time 120 -o "${BIN_PATH}.tmp" "$download_url" 2>/dev/null; then
         warn "GitHub 下载失败，尝试通过 ghproxy 下载..."
         info "下载 ${proxy_url} ..."
-        if ! curl -fSL -o "${BIN_PATH}.tmp" "$proxy_url"; then
+        if ! curl -fSL --connect-timeout 10 --max-time 120 -o "${BIN_PATH}.tmp" "$proxy_url"; then
             rm -f "${BIN_PATH}.tmp"
             error "下载失败（GitHub 和 ghproxy 均失败），请检查版本号和网络连接"
         fi
