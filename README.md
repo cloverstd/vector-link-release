@@ -2,6 +2,11 @@
 
 多节点配置管理系统，采用 Master-Node 架构。
 
+## 文档
+
+- [MCP 接入指南](docs/MCP.md) —— 用 Claude / Cursor / Cline 通过自然语言驱动整套系统
+- [Claude Code Skill](skills/vector-link/SKILL.md) —— 复制到 `~/.claude/skills/vector-link/` 即用
+
 ## 快速安装
 
 ### 统一安装脚本（推荐）
