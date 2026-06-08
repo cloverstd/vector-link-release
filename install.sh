@@ -1019,6 +1019,11 @@ xray:
 log:
   level: "${LOG_LEVEL}"
   file: "/var/log/vector-link-node.log"
+  # Lumberjack 日志轮转参数（默认值）
+  max_size_mb: 100   # 单个日志文件最大体积（MB）
+  max_backups: 5     # 保留的旧日志份数
+  max_age_days: 30   # 旧日志保留最长天数
+  compress: true     # 旧日志是否 gzip 压缩
 
 report_interval: ${REPORT_INTERVAL}
 EOF
