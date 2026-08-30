@@ -2,6 +2,10 @@ FROM alpine:latest
 
 ARG TARGETARCH
 
+LABEL org.opencontainers.image.source="https://github.com/cloverstd/vector-link" \
+      org.opencontainers.image.licenses="GPL-3.0" \
+      org.opencontainers.image.title="Vector-Link"
+
 RUN apk add --no-cache ca-certificates tzdata curl unzip su-exec
 
 ENV TZ=Asia/Shanghai
@@ -19,6 +23,7 @@ RUN mkdir -p /app/data /usr/local/bin /usr/local/share/xray && \
     chown -R appuser:appuser /app /usr/local/share/xray
 
 COPY deploy/entrypoint.sh /app/entrypoint.sh
+COPY LICENSE THIRD_PARTY_NOTICES.md /usr/share/licenses/vector-link/
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8080
