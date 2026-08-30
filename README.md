@@ -64,3 +64,8 @@ bash install.sh --uninstall --mode server --method system
 ```
 
 > 卸载不会删除配置文件和数据目录，如需彻底清理请手动删除。
+
+## 许可证与源码
+
+Vector-Link 使用 GNU General Public License v3 发布。许可证、第三方声明以及
+与每个二进制版本对应的完整源码归档可在同版本发布页面获取。
