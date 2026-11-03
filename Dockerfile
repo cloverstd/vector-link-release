@@ -20,7 +20,7 @@ COPY vector-link-linux-${TARGETARCH} ./vector-link
 RUN chmod +x ./vector-link
 
 RUN mkdir -p /app/data /usr/local/bin /usr/local/share/xray && \
-    chown -R appuser:appuser /app /usr/local/share/xray
+    chown appuser:appuser /app/data /usr/local/share/xray
 
 COPY deploy/entrypoint.sh /app/entrypoint.sh
 COPY LICENSE THIRD_PARTY_NOTICES.md /usr/share/licenses/vector-link/
