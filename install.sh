@@ -826,6 +826,8 @@ services:
       XRAY_BIN_PATH: /app/data/xray
       XRAY_CONFIG_PATH: /app/data/xray-config.json
       XRAY_ASSET_PATH: /app/data/xray-assets
+      GOST_BIN_PATH: /app/data/gost
+      GOST_CONFIG_PATH: /app/data/gost-config.json
       LOG_LEVEL: ${LOG_LEVEL:-info}
       REPORT_INTERVAL: ${REPORT_INTERVAL:-30}
     restart: unless-stopped
@@ -1034,29 +1036,10 @@ EOF
         warn "如需更新 master 地址或 token，请手动编辑: ${config_file}"
     fi
 
-    # 创建 systemd 服务
-    cat > "${service_file}" <<EOF
-[Unit]
-Description=Vector-Link Node
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=${BIN_PATH} node -c ${config_file}
-WorkingDirectory=${CONFIG_DIR}
-Restart=always
-RestartSec=5
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    success "systemd 服务已创建: ${service_file}"
-
-    systemctl daemon-reload
-    systemctl enable "${service_name}"
-    systemctl restart "${service_name}"
-    success "服务已启动"
+    # Only the provisioning step uses root. Runtime writes and self-updates
+    # are confined to /var/lib/vector-link-node by the generated unit.
+    "${BIN_PATH}" node install-service --config "${config_file}"
+    success "低权限服务已启动（用户 vector-link-node）"
 
     echo ""
     echo -e "${GREEN}=========================================${NC}"

@@ -178,29 +178,9 @@ EOF
         warn "如需更新 master 地址或 token，请手动编辑: ${CONFIG_FILE}"
     fi
 
-    # 创建 systemd 服务
-    cat > "${SERVICE_FILE}" <<EOF
-[Unit]
-Description=Vector-Link Node
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=${BIN_PATH} node -c ${CONFIG_FILE}
-WorkingDirectory=${CONFIG_DIR}
-Restart=always
-RestartSec=5
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    info "systemd 服务已创建: ${SERVICE_FILE}"
-
-    systemctl daemon-reload
-    systemctl enable "${SERVICE_NAME}"
-    systemctl restart "${SERVICE_NAME}"
-    info "服务已启动"
+    # Provisioning needs root; the daemon and Xray/Gost run as vector-link-node.
+    "${BIN_PATH}" node install-service --config "${CONFIG_FILE}"
+    info "低权限服务已启动（用户 vector-link-node）"
 
     echo ""
     info "========================================="

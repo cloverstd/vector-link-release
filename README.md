@@ -84,7 +84,8 @@ sudo vector-link-switch-systemd rollback
 保留新版 Master URL、节点 Token、协议及端口。先停止容器，再将最终数据复制到
 `/var/lib/vector-link-node`，转换 `/app/data` 路径，并用容器内同版本的程序替换
 `/usr/local/bin/vector-link`。随后停止旧服务，安装新版配置到
-`/etc/vector-link/node.yaml`，并启用原有 systemd 服务。
+`/etc/vector-link/node.yaml`，调用 `node install-service` 迁移到专用账号后，
+启用原有 systemd 服务。容器版本需要包含该子命令。
 
 新版日志写入 journal；脚本最多等待 90 秒，检查 Master 连接、代理进程及原容器
 映射的业务端口，并要求持续正常至少 10 秒。失败或收到 SIGINT/SIGTERM 时会尝试
@@ -115,3 +116,62 @@ bash install.sh --uninstall --mode server --method system
 
 Vector-Link 使用 GNU General Public License v3 发布。许可证、第三方声明以及
 与每个二进制版本对应的完整源码归档可在同版本发布页面获取。
+
+## Node 以专用账号运行
+
+新的 systemd 安装通过 `vector-link node install-service` 创建专用系统账号
+`vector-link-node`。Node、Xray 和 Gost 使用同一低权限账号；配置文件
+`/etc/vector-link/node.yaml` 由 root 持有，以 `0640` 授予服务组读取权限。
+程序、自升级备份、代理配置、Geo 数据及本地证书只写入
+`/var/lib/vector-link-node`，不授予 `/usr/local/bin`、`/etc` 或整个 `/var/log`
+的写权限。日志交给 journal 管理。
+
+unit 开启 `NoNewPrivileges`、只读系统目录、隐藏 home、私有临时目录及设备、
+内核与 cgroup 保护；仅保留 `CAP_NET_BIND_SERVICE`，使下载后的代理程序也能
+监听 80/443 等低端口。TUN、透明代理或其他需要 `CAP_NET_ADMIN` 的自定义配置
+不在默认权限范围内。
+
+现有 root 服务需要在节点上使用包含此命令的新二进制执行一次迁移；仅在面板
+里自升级不会修改已有 unit。先将可信的新版本二进制安装到
+`/usr/local/bin/vector-link`，再运行：
+
+```bash
+sudo /usr/local/bin/vector-link node install-service --config /etc/vector-link/node.yaml
+
+# 确认运行身份及权限
+systemctl show vector-link-node -p User -p Group -p MainPID -p NoNewPrivileges -p AmbientCapabilities
+ps -o user,group,pid,args -p "$(systemctl show vector-link-node -p MainPID --value)"
+```
+
+迁移保留 Master URL、Token、业务端口和现有代理配置，先准备文件，再停止服务
+复制最终配置。健康检查要求 Master 已连接、已配置的代理进程以服务 UID 运行，
+并持续正常 10 秒；90 秒未通过则自动恢复原服务。配置与 unit 的备份保存在
+`/var/backups/vector-link-node/`，原运行目录在同一文件系统的隐藏备份目录中
+保留，命令输出具体备份位置。可手动回滚：
+
+```bash
+sudo /usr/local/bin/vector-link node install-service --rollback /var/backups/vector-link-node/<备份目录>
+```
+
+迁移会复制配置目录内引用的证书及文件，拒绝符号链接和目录穿越。引用配置目录
+外部的证书或其他现有文件时，先由管理员将所需文件移入原代理配置目录并更新
+引用；工具不会按可写代理配置中的路径任意读取 root 私有文件。自定义 systemd
+启用项或覆盖文件需先检查并移除，避免覆盖新的用户和权限设置。
+
+Docker 仍在入口脚本完成数据目录属主设置后降权到 `appuser`。镜像中的 `/app`
+及入口脚本由 root 持有，运行时二进制放在 `/app/data/bin`，防止低权限进程
+替换下次启动会由 root 执行的入口脚本。同一镜像重启保留自升级后的程序，切换
+镜像时使用新镜像中的程序。
+
+## 串行升级任务
+
+Node、Xray、Gost 的单节点与批量升级共用一个队列。每台升级完成后，Master
+要求收到新的目标版本状态且对应代理持续运行 10 秒，才会升级下一台；Node
+自身升级还要求重新建立 WebSocket 连接。已运行目标版本的健康节点直接跳过，
+Xray/Gost 批次只包含对应类型且已配置的节点。
+
+任一节点下发失败或 15 分钟内未恢复，会停止整个批次，其余节点标记为未尝试。
+同一时间的新升级请求返回 HTTP 409，避免批次互相重叠。请求返回后台任务，
+前端通过 `GET /api/v1/nodes/upgrade-batches/:id` 查询结果，不依赖长连接 HTTP
+超时；关闭页面不会取消已经接受的升级任务。任务记录只保存在 Master 内存中，
+重启 Master 后需重新检查各节点状态。
