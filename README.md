@@ -158,6 +158,11 @@ sudo /usr/local/bin/vector-link node install-service --rollback /var/backups/vec
 引用；工具不会按可写代理配置中的路径任意读取 root 私有文件。自定义 systemd
 启用项或覆盖文件需先检查并移除，避免覆盖新的用户和权限设置。
 
+历史部署的 `/etc/vector-link` 若为 `root:root 0700`，即使 `node.yaml` 已设为
+`0640`，服务账号仍无法读取配置。服务组存在后，应将该目录设置为
+`root:vector-link-node 0750`，保持目录不可被服务组写入，配置文件仍为
+`root:vector-link-node 0640`。本次 LA1 迁移已验证这一兼容处理。
+
 Docker 仍在入口脚本完成数据目录属主设置后降权到 `appuser`。镜像中的 `/app`
 及入口脚本由 root 持有，运行时二进制放在 `/app/data/bin`，防止低权限进程
 替换下次启动会由 root 执行的入口脚本。同一镜像重启保留自升级后的程序，切换
@@ -175,3 +180,11 @@ Xray/Gost 批次只包含对应类型且已配置的节点。
 前端通过 `GET /api/v1/nodes/upgrade-batches/:id` 查询结果，不依赖长连接 HTTP
 超时；关闭页面不会取消已经接受的升级任务。任务记录只保存在 Master 内存中，
 重启 Master 后需重新检查各节点状态。
+
+## v0.0.77 生产上线记录
+
+控制端及 6 个在线节点已逐台更新并完成非 root 运行验证，保留原 Xray/Gost
+版本。使用路由器实际运行的 Mihomo `alpha-g8f2d84f` 验证了 12 条直连/中转
+组合，共 36 次 HTTPS 请求，以及生产 OpenClash 的 3 次请求。已退役的
+US-Home 按要求排除。版本、校验值、备份位置、回滚经过及公开端口修正见
+[上线记录](hosts/rollout-v0.0.77.json)。
