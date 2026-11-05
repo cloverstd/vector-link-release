@@ -1,8 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install the Node agent using Docker or systemd.
-# The Master is deployed through Cloudflare Workers Builds.
+# Vector-Link 统一安装脚本
+# 支持 Server/Node 模式，Docker/系统服务 两种安装方式
+#
+# 交互式安装:
+#   curl -fsSL https://raw.githubusercontent.com/cloverstd/vector-link-release/main/install.sh | bash
+#
+# 非交互式安装:
+#   # Docker Server
+#   bash install.sh --mode server --method docker --port 8080
+#
+#   # 系统服务 Server
+#   bash install.sh --mode server --method system --port 8080
+#
+#   # Docker Node
+#   bash install.sh --mode node --method docker --master http://1.2.3.4:8080 --token YOUR_TOKEN
+#
+#   # 系统服务 Node
+#   bash install.sh --mode node --method system --master http://1.2.3.4:8080 --token YOUR_TOKEN
+#
+#   # 卸载
+#   bash install.sh --uninstall --mode server --method docker
 
 # ── 常量 ────────────────────────────────────────────────────
 REPO="cloverstd/vector-link-release"
@@ -19,12 +38,17 @@ DATA_DIR_SYSTEM="/var/lib/vector-link"
 INSTALL_DIR_DEFAULT="/opt/vector-link"
 
 # ── 全局变量 ─────────────────────────────────────────────────
-MODE="node"          # Node agent
+MODE=""              # server | node
 METHOD=""            # docker | system
 VERSION=""           # 版本号（空则自动获取最新）
 IMAGE_TAG="latest"   # Docker 镜像标签
+PORT="8080"          # Server 端口
 MASTER_URL=""        # Master 地址（Node 模式）
 TOKEN=""             # Node Token
+JWT_SECRET=""        # JWT 密钥（Server 模式）
+JWT_EXPIRATION="24h" # JWT 过期时间
+ADMIN_USER="admin"   # 管理员用户名
+ADMIN_PASS=""        # 管理员密码（空则自动生成）
 INSTALL_DIR=""       # Docker 安装目录
 DATA_DIR=""          # 数据目录
 TIMEZONE="Asia/Shanghai"
@@ -158,7 +182,12 @@ check_existing_installation() {
     # 系统服务模式检查二进制和配置
     local installed_version
     installed_version=$(get_installed_version)
-    local config_file="${CONFIG_DIR}/node.yaml"
+    local config_file
+    if [ "$mode" = "server" ]; then
+        config_file="${CONFIG_DIR}/server.yaml"
+    else
+        config_file="${CONFIG_DIR}/node.yaml"
+    fi
 
     if [ -n "$installed_version" ] || [ -f "$config_file" ]; then
         echo ""
@@ -309,7 +338,13 @@ check_and_setup_ntp() {
 }
 
 # ── 工具函数 ─────────────────────────────────────────────────
+generate_random() {
+    head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'
+}
 
+generate_password() {
+    head -c 12 /dev/urandom | base64 | tr -d '/+=' | head -c 16
+}
 
 convert_master_url() {
     local input="$1"
@@ -411,12 +446,32 @@ parse_args() {
                 VERSION="$2"
                 shift 2
                 ;;
+            --port)
+                PORT="$2"
+                shift 2
+                ;;
             --master)
                 MASTER_URL="$2"
                 shift 2
                 ;;
             --token)
                 TOKEN="$2"
+                shift 2
+                ;;
+            --jwt-secret)
+                JWT_SECRET="$2"
+                shift 2
+                ;;
+            --jwt-expiration)
+                JWT_EXPIRATION="$2"
+                shift 2
+                ;;
+            --admin-user)
+                ADMIN_USER="$2"
+                shift 2
+                ;;
+            --admin-pass)
+                ADMIN_PASS="$2"
                 shift 2
                 ;;
             --install-dir)
@@ -468,30 +523,65 @@ parse_args() {
 
 show_help() {
     cat <<'EOF'
-Vector-Link Node 安装脚本
+Vector-Link 统一安装脚本
 
-用法
-  bash install.sh --mode node --method system --master https://vector-link.cloverstd.com --token YOUR_TOKEN
-  bash install.sh --mode node --method docker --master https://vector-link.cloverstd.com --token YOUR_TOKEN
-  bash install.sh --uninstall --mode node --method system
+用法:
+  install.sh [选项]
 
-选项
-  --method docker|system    安装方式
-  --version VERSION         Node 版本，默认最新稳定版
-  --master URL              Workers Master 地址
-  --token TOKEN             Node Token
-  --install-dir DIR         Docker 安装目录
-  --data-dir DIR            数据目录
-  --timezone TIMEZONE       时区
-  --log-level LEVEL         日志级别
-  --report-interval SECONDS  状态上报间隔
-  --xray-version VERSION    Xray 版本
-  --skip-ntp                跳过 NTP 配置
-  --uninstall               卸载 Node
+通用选项:
+  --mode server|node         安装模式（Server 控制端 / Node 节点）
+  --method docker|system     安装方式（Docker 容器 / 系统服务）
+  --version VERSION          指定版本号（默认: 最新版）
+  --timezone TIMEZONE        时区（默认: Asia/Shanghai）
+  --uninstall                卸载
+  --skip-ntp               跳过 NTP 时间同步检查
+  --install-ntp            自动安装 NTP（非交互式）
+  --help                     显示帮助
+
+Server 选项:
+  --port PORT                监听端口（默认: 8080）
+  --jwt-secret SECRET        JWT 密钥（默认: 自动生成）
+  --jwt-expiration DURATION  JWT 过期时间（默认: 24h）
+  --admin-user USERNAME      管理员用户名（默认: admin）
+  --admin-pass PASSWORD      管理员密码（默认: 自动生成）
+
+Node 选项:
+  --master URL               Master 服务器地址（必填）
+  --token TOKEN              节点 Token（必填）
+  --xray-version VERSION     Xray 版本（默认: latest）
+  --log-level LEVEL          日志级别（默认: info）
+  --report-interval SECONDS  上报间隔秒数（默认: 30）
+
+Docker 选项:
+  --install-dir DIR          安装目录（默认: /opt/vector-link）
+
+系统服务选项:
+  --data-dir DIR             数据目录（默认: /var/lib/vector-link）
+
+示例:
+  # 交互式安装
+  bash install.sh
+
+  # Docker 安装 Server
+  bash install.sh --mode server --method docker --port 8080
+
+  # 系统服务安装 Node
+  bash install.sh --mode node --method system --master http://1.2.3.4:8080 --token YOUR_TOKEN
+
+  # 卸载 Docker Server
+  bash install.sh --uninstall --mode server --method docker
 EOF
 }
 
 # ── 交互式配置 ───────────────────────────────────────────────
+prompt_mode() {
+    local choice
+    choice=$(read_choice "请选择安装模式:" "Server（控制端）" "Node（节点客户端）")
+    case "$choice" in
+        1) MODE="server" ;;
+        2) MODE="node" ;;
+    esac
+}
 
 prompt_method() {
     local choice
@@ -502,6 +592,29 @@ prompt_method() {
     esac
 }
 
+prompt_server_config() {
+    echo "" >&2
+    echo -e "  ${BLUE}── Server 配置 ──${NC}" >&2
+
+    PORT=$(read_input "监听端口" "$PORT")
+
+    local default_pass
+    default_pass=$(generate_password)
+    ADMIN_USER=$(read_input "管理员用户名" "$ADMIN_USER")
+    if [ -z "$ADMIN_PASS" ]; then
+        ADMIN_PASS=$(read_secret "管理员密码" "$default_pass")
+    fi
+
+    JWT_EXPIRATION=$(read_input "JWT 过期时间" "$JWT_EXPIRATION")
+
+    if [ -z "$JWT_SECRET" ]; then
+        JWT_SECRET=$(generate_random)
+    fi
+
+    if [ "$METHOD" = "docker" ]; then
+        INSTALL_DIR=$(read_input "安装目录" "${INSTALL_DIR:-${INSTALL_DIR_DEFAULT}}")
+    fi
+}
 
 prompt_node_config() {
     echo "" >&2
@@ -547,6 +660,105 @@ prompt_common_config() {
 }
 
 # ── Docker 安装 ──────────────────────────────────────────────
+install_docker_server() {
+    check_docker
+
+    local dir="${INSTALL_DIR:-${INSTALL_DIR_DEFAULT}}"
+    local compose_cmd
+    compose_cmd=$(docker_compose_cmd)
+
+    info "安装目录: ${dir}"
+    mkdir -p "${dir}/data"
+
+    # 生成默认值
+    [ -z "$JWT_SECRET" ] && JWT_SECRET=$(generate_random)
+    [ -z "$ADMIN_PASS" ] && ADMIN_PASS=$(generate_password)
+
+    # 生成 .env
+    cat > "${dir}/.env" <<EOF
+# Vector-Link Server 配置
+# 修改后执行: ${compose_cmd} up -d
+
+# 镜像版本
+IMAGE_TAG=${IMAGE_TAG}
+
+# 时区
+TZ=${TIMEZONE}
+
+# 数据目录（容器内挂载）
+DATA_DIR=./data
+
+# Server 端口
+SERVER_PORT=${PORT}
+
+# JWT 配置
+JWT_SECRET=${JWT_SECRET}
+JWT_EXPIRATION=${JWT_EXPIRATION}
+
+# 管理员账号
+ADMIN_USERNAME=${ADMIN_USER}
+ADMIN_PASSWORD=${ADMIN_PASS}
+EOF
+    chmod 600 "${dir}/.env"
+    success "配置文件已生成: ${dir}/.env"
+
+    # 生成 docker-compose.yml
+    cat > "${dir}/docker-compose.yml" <<'EOF'
+services:
+  server:
+    image: ghcr.io/cloverstd/vector-link-release:${IMAGE_TAG:-latest}
+    container_name: vector-link-server
+    command: ["./vector-link", "server"]
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    volumes:
+      - ${DATA_DIR:-./data}:/app/data
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DB_DSN: "file:/app/data/vector-link.db?cache=shared&_fk=1"
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-24h}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+EOF
+    success "docker-compose.yml 已生成: ${dir}/docker-compose.yml"
+
+    # 启动
+    info "拉取镜像并启动容器..."
+    cd "${dir}"
+    ${compose_cmd} pull
+    ${compose_cmd} up -d
+
+    echo ""
+    echo -e "${GREEN}=========================================${NC}"
+    echo -e "${GREEN} Vector-Link Server (Docker) 安装完成！${NC}"
+    echo -e "${GREEN}=========================================${NC}"
+    echo ""
+    info "访问地址: http://<服务器IP>:${PORT}"
+    info "管理账号: ${ADMIN_USER} / ${ADMIN_PASS}"
+    info "安装目录: ${dir}"
+    info ""
+    info "常用命令:"
+    info "  查看状态: cd ${dir} && ${compose_cmd} ps"
+    info "  查看日志: cd ${dir} && ${compose_cmd} logs -f"
+    info "  重启服务: cd ${dir} && ${compose_cmd} restart"
+    info "  停止服务: cd ${dir} && ${compose_cmd} down"
+    info "  更新版本: cd ${dir} && ${compose_cmd} pull && ${compose_cmd} up -d"
+    echo ""
+    warn "请立即修改默认密码！"
+}
 
 install_docker_node() {
     check_docker
@@ -679,6 +891,95 @@ download_binary() {
     success "二进制文件已安装到 ${BIN_PATH}"
 }
 
+install_system_server() {
+    check_root
+    check_systemd
+
+    local data_dir="${DATA_DIR:-${DATA_DIR_SYSTEM}}"
+    local config_file="${CONFIG_DIR}/server.yaml"
+    local service_name="vector-link-server"
+    local service_file="/etc/systemd/system/${service_name}.service"
+
+    download_binary "$VERSION"
+
+    mkdir -p "${CONFIG_DIR}" "${data_dir}"
+
+    # 生成默认值
+    [ -z "$JWT_SECRET" ] && JWT_SECRET=$(generate_random)
+    [ -z "$ADMIN_PASS" ] && ADMIN_PASS=$(generate_password)
+
+    # 生成配置文件（不覆盖已有配置）
+    if [ ! -f "${config_file}" ] || [ "$OVERWRITE_CONFIG" = true ]; then
+        if [ -f "${config_file}" ] && [ "$OVERWRITE_CONFIG" = true ]; then
+            local backup="${config_file}.bak.$(date +%Y%m%d%H%M%S)"
+            cp "${config_file}" "${backup}"
+            info "原配置已备份到: ${backup}"
+        fi
+        cat > "${config_file}" <<EOF
+server:
+  host: 0.0.0.0
+  port: ${PORT}
+
+database:
+  driver: sqlite3
+  dsn: "file:${data_dir}/vector-link.db?cache=shared&_fk=1"
+
+jwt:
+  secret: "${JWT_SECRET}"
+  expiration: ${JWT_EXPIRATION}
+
+admin:
+  username: ${ADMIN_USER}
+  password: "${ADMIN_PASS}"
+EOF
+        chmod 600 "${config_file}"
+        success "配置文件已生成: ${config_file}"
+    else
+        info "配置文件已存在，跳过生成: ${config_file}"
+    fi
+
+    # 创建 systemd 服务
+    cat > "${service_file}" <<EOF
+[Unit]
+Description=Vector-Link Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${BIN_PATH} server -c ${config_file}
+WorkingDirectory=${data_dir}
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    success "systemd 服务已创建: ${service_file}"
+
+    systemctl daemon-reload
+    systemctl enable "${service_name}"
+    systemctl restart "${service_name}"
+    success "服务已启动"
+
+    echo ""
+    echo -e "${GREEN}=========================================${NC}"
+    echo -e "${GREEN} Vector-Link Server (系统服务) 安装完成！${NC}"
+    echo -e "${GREEN}=========================================${NC}"
+    echo ""
+    info "访问地址: http://<服务器IP>:${PORT}"
+    info "管理账号: ${ADMIN_USER} / ${ADMIN_PASS}"
+    info "配置文件: ${config_file}"
+    info "数据目录: ${data_dir}"
+    info ""
+    info "常用命令:"
+    info "  查看状态: systemctl status ${service_name}"
+    info "  查看日志: journalctl -u ${service_name} -f"
+    info "  重启服务: systemctl restart ${service_name}"
+    info "  停止服务: systemctl stop ${service_name}"
+    echo ""
+    warn "请立即修改默认密码！"
+}
 
 install_system_node() {
     check_root
@@ -799,11 +1100,13 @@ uninstall_system() {
 
     warn "配置和数据目录未删除（如需清理请手动操作）："
     warn "  配置: ${CONFIG_DIR}"
+    [ "$MODE" = "server" ] && warn "  数据: ${DATA_DIR_SYSTEM}"
 
     success "系统服务卸载完成"
 }
 
 do_uninstall() {
+    [ -z "$MODE" ] && prompt_mode
     [ -z "$METHOD" ] && prompt_method
 
     case "$METHOD" in
@@ -816,7 +1119,6 @@ do_uninstall() {
 # ── 主流程 ───────────────────────────────────────────────────
 main() {
     parse_args "$@"
-    [ "$MODE" = "node" ] || error "Master 已迁至 Cloudflare Workers，本脚本仅安装 Node"
 
     echo ""
     echo -e "${BOLD}${BLUE}Vector-Link 安装向导${NC}"
@@ -829,12 +1131,14 @@ main() {
     fi
 
     # 交互式选择
+    [ -z "$MODE" ] && prompt_mode
     [ -z "$METHOD" ] && prompt_method
 
     # 收集配置
     case "$MODE" in
+        server) prompt_server_config ;;
         node) prompt_node_config ;;
-        *) error "无效的模式: $MODE（仅支持 node）" ;;
+        *) error "无效的模式: $MODE（仅支持 server/node）" ;;
     esac
     prompt_common_config
 
@@ -849,11 +1153,18 @@ main() {
     echo -e "  ${BLUE}── 安装概要 ──${NC}"
     echo -e "  模式:     ${BOLD}${MODE}${NC}"
     echo -e "  安装方式: ${BOLD}${METHOD}${NC}"
-    echo -e "  Master:   ${BOLD}${MASTER_URL}${NC}"
+    if [ "$MODE" = "server" ]; then
+        echo -e "  端口:     ${BOLD}${PORT}${NC}"
+        echo -e "  管理员:   ${BOLD}${ADMIN_USER}${NC}"
+    else
+        echo -e "  Master:   ${BOLD}${MASTER_URL}${NC}"
+    fi
     echo ""
 
     # 执行安装
     case "${MODE}-${METHOD}" in
+        server-docker) install_docker_server ;;
+        server-system) install_system_server ;;
         node-docker) install_docker_node ;;
         node-system) install_system_node ;;
         *) error "无效的组合: mode=${MODE}, method=${METHOD}" ;;

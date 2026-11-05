@@ -1,23 +1,61 @@
-# Vector-Link 部署
+# Vector-Link
 
-Master 使用 Cloudflare Workers、D1 和 Durable Objects，由 Cloudflare Workers Builds 发布。
-连接源码仓库后，项目根目录设置为 `worker`，构建命令为 `yarn ci:build`，部署命令为 `yarn ci:deploy`。
-详细配置见源码仓库的 `worker/README.md`。
+多节点配置管理系统，采用 Master-Node 架构。
 
-GitHub Actions 发布 Go Node 二进制及镜像。安装 Node：
+## 文档
+
+- [MCP 接入指南](docs/MCP.md) —— 用 Claude / Cursor / Cline 通过自然语言驱动整套系统
+- [Claude Code Skill](skills/vector-link/SKILL.md) —— 复制到 `~/.claude/skills/vector-link/` 即用
+
+## 快速安装
+
+### 统一安装脚本（推荐）
+
+交互式安装，自动选择 Server/Node 模式和 Docker/系统服务方式：
 
 ```bash
-bash install.sh --mode node --method system --master https://vector-link.cloverstd.com --token <TOKEN>
-bash install.sh --mode node --method docker --master https://vector-link.cloverstd.com --token <TOKEN>
+curl -fsSL https://raw.githubusercontent.com/cloverstd/vector-link-release/main/install.sh | bash
 ```
 
-Node 配置位于 `/etc/vector-link/node.yaml`，服务名为 `vector-link-node`。
+### 非交互式安装
 
 ```bash
-systemctl status vector-link-node
-journalctl -u vector-link-node -f
-bash install.sh --uninstall --mode node --method system
+# Server（系统服务）
+bash install.sh --mode server --method system --port 8080
+
+# Node（系统服务）
+bash install.sh --mode node --method system --master http://<SERVER>:8080 --token <TOKEN>
+
+# Server（Docker）
+bash install.sh --mode server --method docker --port 8080
+
+# Node（Docker）
+bash install.sh --mode node --method docker --master http://<SERVER>:8080 --token <TOKEN>
 ```
+
+安装完成后，默认访问地址 `http://<服务器IP>:8080`，默认账号 `admin` / `admin123`，请立即修改密码。
+
+## 服务管理
+
+```bash
+# 查看状态
+systemctl status vector-link-server
+
+# 查看日志
+journalctl -u vector-link-server -f
+
+# 重启
+systemctl restart vector-link-server
+
+# 停止
+systemctl stop vector-link-server
+```
+
+## 配置文件
+
+| 组件 | 配置文件路径 |
+|------|------------|
+| Server | `/etc/vector-link/server.yaml` |
 
 ## Node 从 Docker 切换到原 systemd 服务
 
@@ -120,11 +158,6 @@ sudo /usr/local/bin/vector-link node install-service --rollback /var/backups/vec
 引用；工具不会按可写代理配置中的路径任意读取 root 私有文件。自定义 systemd
 启用项或覆盖文件需先检查并移除，避免覆盖新的用户和权限设置。
 
-历史部署的 `/etc/vector-link` 若为 `root:root 0700`，即使 `node.yaml` 已设为
-`0640`，服务账号仍无法读取配置。服务组存在后，应将该目录设置为
-`root:vector-link-node 0750`，保持目录不可被服务组写入，配置文件仍为
-`root:vector-link-node 0640`。本次 LA1 迁移已验证这一兼容处理。
-
 Docker 仍在入口脚本完成数据目录属主设置后降权到 `appuser`。镜像中的 `/app`
 及入口脚本由 root 持有，运行时二进制放在 `/app/data/bin`，防止低权限进程
 替换下次启动会由 root 执行的入口脚本。同一镜像重启保留自升级后的程序，切换
@@ -134,17 +167,11 @@ Docker 仍在入口脚本完成数据目录属主设置后降权到 `appuser`。
 
 Node、Xray、Gost 的单节点与批量升级共用一个队列。每台升级完成后，Master
 要求收到新的目标版本状态且对应代理持续运行 10 秒，才会升级下一台；Node
-自身升级还要求重新建立 WebSocket 连接。Xray/Gost 批次只包含对应类型且已配置的节点。
+自身升级还要求重新建立 WebSocket 连接。已运行目标版本的健康节点直接跳过，
+Xray/Gost 批次只包含对应类型且已配置的节点。
 
 任一节点下发失败或 15 分钟内未恢复，会停止整个批次，其余节点标记为未尝试。
 同一时间的新升级请求返回 HTTP 409，避免批次互相重叠。请求返回后台任务，
 前端通过 `GET /api/v1/nodes/upgrade-batches/:id` 查询结果，不依赖长连接 HTTP
-超时；关闭页面不会取消已经接受的升级任务。任务进度和超时保存在 Durable Object 中，Worker 重启后继续执行。
-
-## v0.0.77 生产上线记录
-
-控制端及 6 个在线节点已逐台更新并完成非 root 运行验证，保留原 Xray/Gost
-版本。使用路由器实际运行的 Mihomo `alpha-g8f2d84f` 验证了 12 条直连/中转
-组合，共 36 次 HTTPS 请求，以及生产 OpenClash 的 3 次请求。已退役的
-US-Home 按要求排除。版本、校验值、备份位置、回滚经过及公开端口修正见
-[上线记录](hosts/rollout-v0.0.77.json)。
+超时；关闭页面不会取消已经接受的升级任务。任务记录只保存在 Master 内存中，
+重启 Master 后需重新检查各节点状态。
