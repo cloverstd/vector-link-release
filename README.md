@@ -188,3 +188,27 @@ Xray/Gost 批次只包含对应类型且已配置的节点。
 组合，共 36 次 HTTPS 请求，以及生产 OpenClash 的 3 次请求。已退役的
 US-Home 按要求排除。版本、校验值、备份位置、回滚经过及公开端口修正见
 [上线记录](hosts/rollout-v0.0.77.json)。
+
+
+## 配置发布与恢复
+
+先升级 Master，再逐台升级 Node。旧版 Node 继续使用已有配置，升级后才能接收配置发布。
+配置页和节点页显示逐台发布进度。试运行期间通过当前节点验证代理及 Master 网页，
+再点击「确认保留」。120 秒内未确认时，Node 会恢复上一份配置和资源并停止整批发布。
+规则集刷新、用户恢复和配置编辑需显式发布，超额用户仍会即时禁用。
+
+如果节点报告恢复失败，可通过 SSH 停止 Node 服务，恢复本地快照，再启动服务。
+系统服务示例：
+
+```bash
+sudo systemctl stop vector-link-node
+sudo -u vector-link-node /var/lib/vector-link-node/bin/vector-link node rollback-config -c /etc/vector-link/node.yaml --engine xray
+sudo systemctl start vector-link-node
+```
+
+使用与现有服务相同的用户和配置路径。Gost 节点使用 `--engine gost`。
+
+Master 若在反向代理后运行，可用 `server.trusted_proxies` 或环境变量
+`SERVER_TRUSTED_PROXIES` 配置可信代理的 CIDR（环境变量用逗号分隔）。
+最外层代理应覆盖外部请求的 `X-Forwarded-For`。只填代理实际连接 Master
+的地址范围。未配置时，登录限制和审计使用直接连接方的 IP。

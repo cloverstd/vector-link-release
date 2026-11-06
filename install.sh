@@ -716,6 +716,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       DB_DSN: "file:/app/data/vector-link.db?cache=shared&_fk=1"
+      SERVER_TRUSTED_PROXIES: "${SERVER_TRUSTED_PROXIES:-}"
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION: ${JWT_EXPIRATION:-24h}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
